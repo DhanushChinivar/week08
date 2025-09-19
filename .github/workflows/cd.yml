@@ -1,0 +1,55 @@
+name: CD - Deploy to AKS (main only)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+  ACR_NAME: ${{ secrets.ACR_NAME }}
+  AKS_RG: deakinuni
+  AKS_CLUSTER: dhanushsit
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set AKS context
+        uses: azure/aks-set-context@v3
+        with:
+          resource-group: ${{ env.AKS_RG }}
+          cluster-name:  ${{ env.AKS_CLUSTER }}
+
+      - name: (Optional) inject backend IPs into frontend/main.js
+        run: |
+          # keep only if you still use raw IPs; otherwise remove.
+          sed -n '1,120p' frontend/main.js
+
+      - name: Apply k8s manifests
+        run: |
+          kubectl apply -f k8s/order-db-deployment.yaml
+          kubectl apply -f k8s/product-db-deployment.yaml
+          kubectl apply -f k8s/order-service.yaml
+          kubectl apply -f k8s/product-service.yaml
+          kubectl apply -f k8s/frontend-deployment.yaml
+          kubectl apply -f k8s/frontend-service.yaml
+
+      - name: Wait for deployments
+        run: |
+          kubectl rollout status deployment order-db-deployment --timeout=120s || true
+          kubectl rollout status deployment product-db-deployment --timeout=120s || true
+          kubectl rollout status deployment order-service --timeout=120s || true
+          kubectl rollout status deployment product-service --timeout=120s || true
+          kubectl rollout status deployment frontend --timeout=120s || true
+
+      - name: Show services
+        run: kubectl get svc -o wide
